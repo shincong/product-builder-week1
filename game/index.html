@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity Climber</title>
+    <style>
+        :root {
+            --bg-ground: #87ceeb; /* 지상 하늘 */
+            --bg-space: #020617;  /* 우주 */
+            --player-color: #3b82f6;
+            --platform-color: #10b981;
+            --text-color: #f8fafc;
+            --charge-color: #fbbf24;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: var(--bg-space);
+            font-family: 'Noto Sans KR', sans-serif;
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 500px;
+            height: 700px;
+            border: 4px solid #334155;
+            background: linear-gradient(to top, var(--bg-ground), #1e293b, var(--bg-space));
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.7);
+            overflow: hidden;
+        }
+
+        #canvas {
+            display: block;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            z-index: 5;
+        }
+
+        .stat-item {
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+        }
+
+        #charge-bar-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid #fff;
+            border-radius: 10px;
+            overflow: hidden;
+            z-index: 5;
+        }
+
+        #charge-bar {
+            width: 0%;
+            height: 100%;
+            background: var(--charge-color);
+            transition: width 0.05s linear;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(15, 23, 42, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 36px;
+            color: var(--player-color);
+            text-transform: uppercase;
+            text-align: center;
+        }
+
+        .btn {
+            padding: 12px 32px;
+            font-size: 20px;
+            font-weight: bold;
+            color: white;
+            background-color: var(--player-color);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .hidden { display: none !important; }
+
+        .instructions {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Antigravity Climber</h1>
+
+    <div id="game-container">
+        <canvas id="canvas"></canvas>
+        
+        <div id="ui">
+            <div class="stat-item">고도: <span id="altitude">0</span>m</div>
+            <div class="stat-item">최고: <span id="best-alt">0</span>m</div>
+        </div>
+
+        <div id="charge-bar-container">
+            <div id="charge-bar"></div>
+        </div>
+
+        <div id="overlay">
+            <h2 id="overlay-title">지상에서 우주로!</h2>
+            <div class="instructions">
+                <strong>Space 길게 누르기</strong>: 점프 에너지 충전<br>
+                <strong>Space 떼기</strong>: 위로 도약!<br>
+                움직이는 발판을 밟고 하늘 높이 올라가세요.<br>
+                화면 아래로 떨어지면 게임 오버입니다.
+            </div>
+            <button id="start-btn" class="btn">시작하기</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const altElement = document.getElementById('altitude');
+        const bestAltElement = document.getElementById('best-alt');
+        const chargeBar = document.getElementById('charge-bar');
+        const overlay = document.getElementById('overlay');
+        const startBtn = document.getElementById('start-btn');
+
+        const CW = 500;
+        const CH = 700;
+        canvas.width = CW;
+        canvas.height = CH;
+
+        let gameActive = false;
+        let bestAltitude = localStorage.getItem('antigravity-best-alt') || 0;
+        bestAltElement.textContent = bestAltitude;
+
+        let cameraY = 0;
+        let currentAltitude = 0;
+
+        // 플레이어
+        const player = {
+            x: CW / 2 - 15,
+            y: CH - 100,
+            w: 30,
+            h: 30,
+            vx: 0,
+            vy: 0,
+            gravity: 0.25,
+            isCharging: false,
+            charge: 0,
+            maxCharge: 100,
+            jumpStrength: 15,
+            isGrounded: true,
+            color: '#3b82f6'
+        };
+
+        // 플랫폼 (발판)
+        let platforms = [];
+        const PLATFORM_W = 100;
+        const PLATFORM_H = 15;
+
+        function init() {
+            cameraY = 0;
+            currentAltitude = 0;
+            altElement.textContent = 0;
+            
+            player.x = CW / 2 - 15;
+            player.y = CH - 100;
+            player.vx = 0;
+            player.vy = 0;
+            player.charge = 0;
+            player.isCharging = false;
+            player.isGrounded = true;
+
+            platforms = [];
+            // 시작 발판
+            platforms.push({ x: CW / 2 - 60, y: CH - 50, w: 120, h: PLATFORM_H, speed: 0 });
+            
+            // 초기 발판들 생성
+            for (let i = 1; i < 10; i++) {
+                spawnPlatform(CH - i * 150);
+            }
+        }
+
+        function spawnPlatform(y) {
+            const speed = Math.random() * 2 + (currentAltitude / 500); // 높이 올라갈수록 빨라짐
+            platforms.push({
+                x: Math.random() * (CW - PLATFORM_W),
+                y: y,
+                w: PLATFORM_W,
+                h: PLATFORM_H,
+                speed: Math.random() > 0.5 ? speed : -speed,
+                color: '#10b981'
+            });
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            // 충전 로직
+            if (player.isCharging) {
+                player.charge = Math.min(player.charge + 2, player.maxCharge);
+                chargeBar.style.width = player.charge + '%';
+            }
+
+            // 물리 법칙
+            player.vy += player.gravity;
+            player.y += player.vy;
+            player.x += player.vx;
+
+            // 좌우 벽 튕기기 또는 통과
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.w > CW) player.x = CW - player.w;
+
+            // 발판 충돌 체크 (내려오는 중일 때만)
+            player.isGrounded = false;
+            if (player.vy > 0) {
+                for (const p of platforms) {
+                    if (
+                        player.x + player.w > p.x &&
+                        player.x < p.x + p.w &&
+                        player.y + player.h > p.y &&
+                        player.y + player.h < p.y + p.h + player.vy + 2
+                    ) {
+                        player.y = p.y - player.h;
+                        player.vy = 0;
+                        player.isGrounded = true;
+                        // 발판 위에서 같이 이동
+                        player.x += p.speed; 
+                        break;
+                    }
+                }
+            }
+
+            // 카메라 이동 (플레이어가 화면 상단으로 가면 카메라가 올라감)
+            if (player.y < cameraY + 250) {
+                cameraY = player.y - 250;
+            }
+
+            // 점수 계산 (고도)
+            const alt = Math.floor(Math.abs(Math.min(0, player.y - (CH - 100))) / 10);
+            if (alt > currentAltitude) {
+                currentAltitude = alt;
+                altElement.textContent = currentAltitude;
+                if (currentAltitude > bestAltitude) {
+                    bestAltitude = currentAltitude;
+                    bestAltElement.textContent = bestAltitude;
+                    localStorage.setItem('antigravity-best-alt', bestAltitude);
+                }
+            }
+
+            // 발판 이동 및 재생성
+            for (let i = platforms.length - 1; i >= 0; i--) {
+                const p = platforms[i];
+                p.x += p.speed;
+                if (p.x < 0 || p.x + p.w > CW) p.speed *= -1;
+
+                // 화면 아래로 사라진 발판 제거 및 위에 새로 생성
+                if (p.y > cameraY + CH + 100) {
+                    platforms.splice(i, 1);
+                    const highestY = Math.min(...platforms.map(pl => pl.y));
+                    spawnPlatform(highestY - 150);
+                }
+            }
+
+            // 게임 오버 (화면 아래로 추락)
+            if (player.y > cameraY + CH + 50) {
+                gameOver();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, CW, CH);
+
+            ctx.save();
+            ctx.translate(0, -cameraY);
+
+            // 배경 그라데이션 (고도에 따라 변화)
+            const groundColor = '#87ceeb';
+            const spaceColor = '#020617';
+            // 실제 배경은 CSS 그라데이션이 처리하지만, 레이어 효과를 위해 간단히 구름/별 추가 가능
+            
+            // 별 그리기 (우주 느낌)
+            if (currentAltitude > 200) {
+                ctx.fillStyle = 'white';
+                for(let i=0; i<50; i++) {
+                    const sx = (Math.sin(i*123.45) * 0.5 + 0.5) * CW;
+                    const sy = cameraY + (Math.cos(i*678.9) * 0.5 + 0.5) * CH;
+                    ctx.fillRect(sx, sy, 2, 2);
+                }
+            }
+
+            // 발판 그리기
+            for (const p of platforms) {
+                ctx.fillStyle = p.color;
+                // 높이 올라갈수록 발판이 작아지거나 투명해지는 효과 가능
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                // 발판 하단 그림자
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(p.x, p.y + p.h, p.w, 4);
+            }
+
+            // 플레이어 그리기
+            ctx.fillStyle = player.color;
+            if (player.isCharging) {
+                // 충전 중일 때 부르르 떨리는 효과
+                const shake = (player.charge / 20);
+                ctx.fillRect(player.x + (Math.random()-0.5)*shake, player.y, player.w, player.h);
+                // 충전 오라
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(player.x - 5, player.y - 5, player.w + 10, player.h + 10);
+            } else {
+                ctx.fillRect(player.x, player.y, player.w, player.h);
+            }
+
+            // 플레이어 눈
+            ctx.fillStyle = 'white';
+            ctx.fillRect(player.x + 5, player.y + 5, 6, 6);
+            ctx.fillRect(player.x + 19, player.y + 5, 6, 6);
+
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function jump() {
+            if (!player.isGrounded && player.charge < 20) return; // 공중에서는 최소 충전 필요 (공중 점프 허용 시)
+            
+            const power = (player.charge / player.maxCharge) * player.jumpStrength + 5;
+            player.vy = -power;
+            player.isGrounded = false;
+            player.charge = 0;
+            chargeBar.style.width = '0%';
+        }
+
+        function gameOver() {
+            gameActive = false;
+            document.getElementById('overlay-title').textContent = '지상으로 추락했습니다!';
+            startBtn.textContent = '다시 도전';
+            overlay.classList.remove('hidden');
+        }
+
+        // 이벤트
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                if (gameActive) {
+                    player.isCharging = true;
+                } else if (!overlay.classList.contains('hidden')) {
+                    init();
+                    gameActive = true;
+                    overlay.classList.add('hidden');
+                }
+                e.preventDefault();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space' && gameActive && player.isCharging) {
+                player.isCharging = false;
+                jump();
+            }
+        });
+
+        startBtn.addEventListener('click', () => {
+            init();
+            gameActive = true;
+            overlay.classList.add('hidden');
+        });
+
+        gameLoop();
+    </script>
+</body>
+</html>
